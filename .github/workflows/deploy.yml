@@ -3,6 +3,10 @@ name: Node.js & React CI/CD to EC2 (Apache)
 on:
   push:
     branches: [master]
+env:
+  AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+  AWS_EC2_USER: ${{ secrets.AWS_EC2_USER }}
+  AWS_EC2_PORT: ${{ secrets.AWS_EC2_PORT || '22' }}
 
 jobs:
   test:
