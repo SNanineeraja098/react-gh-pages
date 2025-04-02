@@ -29,8 +29,6 @@ jobs:
         
       - name: Build React app
         run: |
-          cd client
-          npm ci
           npm run build
 
   deploy:
