@@ -1,0 +1,100 @@
+name: Deploy Node.js Backend and React Frontend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # Install dependencies and build React
+      - name: Build React Frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+          cd ..
+
+      # Copy built React files to EC2
+      - name: Deploy React Frontend
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+          FRONTEND_DIR: ${{ secrets.FRONTEND_DIR }}
+        run: |
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" frontend/build/ ${EC2_USER}@${EC2_HOST}:${FRONTEND_DIR}
+
+      # Install Node.js backend dependencies
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          npm ci
+          cd ..
+
+      # Copy backend files to EC2
+      - name: Deploy Node.js Backend
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" backend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR} \
+          --exclude='node_modules' \
+          --exclude='.env'
+
+      # Connect to EC2 and restart Node.js service
+      - name: Restart Node.js Service
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          ssh ${EC2_USER}@${EC2_HOST} << 'EOF'
+          set -e
+          echo "Deploying Node.js Application..."
+          cd ${APP_DIR}
+          
+          # Install PM2 if not present
+          if ! command -v pm2 &> /dev/null; then
+            echo "Installing PM2..."
+            sudo npm install -g pm2
+          fi
+          
+          # Install production dependencies
+          echo "Installing dependencies..."
+          npm ci --only=production
+          
+          # Restart the Node.js application
+          echo "Restarting Node.js application..."
+          pm2 delete all || true
+          pm2 start server.js --name "node-app"
+          pm2 save
+          pm2 startup
+          EOF
+
+      # Reload Nginx (or Apache) to serve the frontend
+      - name: Reload Web Server
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+        run: |
+          ssh ${EC2_USER}@${EC2_HOST} "sudo systemctl reload nginx"
