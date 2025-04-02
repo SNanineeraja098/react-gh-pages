@@ -1,0 +1,52 @@
+name: Node.js & React CI/CD to EC2 (Apache)
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+      - run: npm ci
+      - run: npm test
+      - run: |
+          cd client
+          npm ci
+          npm run build
+
+  deploy:
+    needs: test  # Only deploy if tests pass
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+      - run: npm ci
+      - run: |
+          cd client
+          npm ci
+          npm run build
+
+      # SSH into EC2 and deploy
+      - name: Deploy to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ${{ secrets.AWS_EC2_SSH_KEY }} \
+          ${{ secrets.AWS_EC2_USER }}@${{ secrets.AWS_EC2_HOST }} << 'EOF'
+          cd /var/www
+          sudo rm -rf app-backup
+          sudo mv html html-backup || true
+          sudo git clone https://github.com/${{ github.repository }}.git html
+          cd html
+          npm ci
+          cd client
+          npm ci
+          npm run build
+          sudo cp -r build/* /var/www/html/
+          sudo systemctl restart apache2
+          EOF
