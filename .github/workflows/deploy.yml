@@ -1,102 +1,100 @@
-name: Node.js & React CI/CD to EC2
+name: Deploy Node.js Backend and React Frontend
 
 on:
   push:
-    branches: [main]
-
-env:
-  AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
-  AWS_EC2_USER: ${{ secrets.AWS_EC2_USER }}
-  AWS_EC2_PORT: ${{ secrets.AWS_EC2_PORT || '22' }}
+    branches:
+      - main
 
 jobs:
-  test:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18.x
-          cache: 'npm'
-          
-      - name: Install dependencies
-        run: npm ci
-        
-      - name: Run tests
-        run: npm test
-        
-      - name: Build React app
-        run: |
-          npm run build
 
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 18.x
-          
-      - name: Install dependencies
-        run: npm ci
-        
-      - name: Build React app
-        run: |
-          npm run build
-          
-      # SSH Setup with Robust Key Handling
-      - name: Create SSH Key File
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.AWS_EC2_SSH_KEY }}" > ~/.ssh/ec2_key
-          chmod 600 ~/.ssh/ec2_key
-          cat ~/.ssh/ec2_key | ssh-keygen -y -f /dev/stdin > ~/.ssh/ec2_key.pub
-          
-      - name: Test SSH Connection
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # Install dependencies and build React app
+      - name: Build React Frontend
         run: |
-          ssh -vvv -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -i ~/.ssh/ec2_key \
-              -p ${{ env.AWS_EC2_PORT }} \
-              ${{ env.AWS_EC2_USER }}@${{ env.AWS_EC2_HOST }} \
-              "echo 'SSH connection successful!'"
-              
-      # Deployment Commands
-      - name: Deploy Application
-        run: |
-          ssh -i ~/.ssh/ec2_key \
-              -p ${{ env.AWS_EC2_PORT }} \
-              ${{ env.AWS_EC2_USER }}@${{ env.AWS_EC2_HOST }} << 'EOF'
-          # Create backup
-          sudo rm -rf /var/www/html_backup
-          sudo cp -r /var/www/html /var/www/html_backup || true
-          
-          # Prepare new version
-          TEMP_DIR=$(mktemp -d)
-          git clone https://github.com/${{ github.repository }}.git $TEMP_DIR
-          
-          # Install and build
-          cd $TEMP_DIR
-          npm ci
-          cd client
+          cd frontend
           npm ci
           npm run build
+          cd ..
+
+      # Copy built React files to EC2
+      - name: Deploy React Frontend
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+          FRONTEND_DIR: ${{ secrets.FRONTEND_DIR }}
+        run: |
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" frontend/build/ ${EC2_USER}@${EC2_HOST}:${FRONTEND_DIR}
+
+      # Install Node.js backend dependencies
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          npm ci
+          cd ..
+
+      # Copy backend files to EC2
+      - name: Deploy Node.js Backend
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" backend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR} \
+          --exclude='node_modules' \
+          --exclude='.env'
+
+      # Connect to EC2 and restart Node.js service
+      - name: Restart Node.js Service
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          ssh ${EC2_USER}@${EC2_HOST} << 'EOF'
+          set -e
+          echo "Deploying Node.js Application..."
+          cd ${APP_DIR}
           
-          # Deploy to production
-          sudo rm -rf /var/www/html/*
-          sudo cp -r build/* /var/www/html/
+          # Install PM2 if not present
+          if ! command -v pm2 &> /dev/null; then
+            echo "Installing PM2..."
+            sudo npm install -g pm2
+          fi
           
+          # Install production dependencies
+          echo "Installing dependencies..."
+          npm ci --only=production
           
-          # Cleanup
-          rm -rf $TEMP_DIR
-          
-          # Restart Apache
-          sudo systemctl restart apache2
+          # Restart the Node.js application
+          echo "Restarting Node.js application..."
+          pm2 delete all || true
+          pm2 start server.js --name "node-app"
+          pm2 save
+          pm2 startup
           EOF
+
+      # Reload Nginx (or Apache) to serve the frontend
+      - name: Reload Web Server
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: "ubuntu"
+        run: |
+          ssh ${EC2_USER}@${EC2_HOST} "sudo systemctl reload nginx"
