@@ -14,10 +14,7 @@ jobs:
           node-version: 18.x
       - run: npm ci
       - run: npm test
-      - run: |
-          cd client
-          npm ci
-          npm run build
+      - run: npm run build  # Removed cd client
 
   deploy:
     needs: test  # Only deploy if tests pass
@@ -28,10 +25,7 @@ jobs:
         with:
           node-version: 18.x
       - run: npm ci
-      - run: |
-          cd client
-          npm ci
-          npm run build
+      - run: npm run build  # Removed cd client
 
       # SSH into EC2 and deploy
       - name: Deploy to EC2
@@ -44,9 +38,7 @@ jobs:
           sudo git clone https://github.com/${{ github.repository }}.git html
           cd html
           npm ci
-          cd client
-          npm ci
-          npm run build
+          npm run build  # Removed cd client
           sudo cp -r build/* /var/www/html/
           sudo systemctl restart apache2
           EOF
