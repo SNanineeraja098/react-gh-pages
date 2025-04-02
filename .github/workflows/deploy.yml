@@ -2,7 +2,7 @@ name: Node.js & React CI/CD to EC2
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 env:
   AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
