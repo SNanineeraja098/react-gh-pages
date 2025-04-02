@@ -49,8 +49,6 @@ jobs:
         
       - name: Build React app
         run: |
-          cd client
-          npm ci
           npm run build
           
       # SSH Setup with Robust Key Handling
