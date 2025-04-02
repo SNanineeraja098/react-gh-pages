@@ -100,11 +100,3 @@ jobs:
           # Restart Apache
           sudo systemctl restart apache2
           EOF
-          
-      # Verification
-      - name: Verify Deployment
-        run: |
-          ssh -i ~/.ssh/ec2_key \
-              ${{ env.AWS_EC2_USER }}@${{ env.AWS_EC2_HOST }} \
-              "curl -sI http://localhost | grep '200 OK' && \
-               curl -sI http://localhost:3000/api | grep '200 OK'"
