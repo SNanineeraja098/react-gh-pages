@@ -30,7 +30,10 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
         
           # Add EC2 host to known_hosts with all key types
-          ssh-keyscan -t rsa,ecdsa,ed25519 "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -t rsa,ecdsa,ed25519 "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts || {
+            echo "Error adding host to known_hosts"
+            exit 1
+          }
           chmod 644 ~/.ssh/known_hosts
         
           # Verify setup
@@ -92,3 +95,6 @@ jobs:
           
           # Install production dependencies
           echo "Installing dependencies..."
+          npm ci --only=production
+          pm2 restart all || pm2 start app.js --name "my-app"
+          EOF
