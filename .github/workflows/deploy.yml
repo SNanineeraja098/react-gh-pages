@@ -30,7 +30,7 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
         
           # Add EC2 host to known_hosts with all key types
-          ssh-keyscan -t rsa,ecdsa,ed25519 ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -t rsa,ecdsa,ed25519 "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
         
           # Verify setup
@@ -92,20 +92,3 @@ jobs:
           
           # Install production dependencies
           echo "Installing dependencies..."
-          npm ci --only=production
-          
-          # Restart the Node.js application
-          echo "Restarting Node.js application..."
-          pm2 delete all || true
-          pm2 start server.js --name "node-app"
-          pm2 save
-          pm2 startup
-          EOF
-
-      # Reload Nginx (or Apache) to serve the frontend
-      - name: Reload Web Server
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: "ubuntu"
-        run: |
-          ssh ${EC2_USER}@${EC2_HOST} "sudo systemctl reload nginx"
