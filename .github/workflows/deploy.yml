@@ -26,10 +26,10 @@ jobs:
           chmod 700 ~/.ssh
           
           # Properly format the private key (handles newlines in GitHub secrets)
-          echo "${{ secrets.AWS_EC2_SSH_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          # echo "${{ secrets.AWS_EC2_SSH_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
+          # chmod 600 ~/.ssh/id_rsa
         
-          # Add EC2 host to known_hosts with all key types
+          # Add EC2 host to known_hosts with RSA key type
           ssh-keyscan -t rsa  "${{ secrets.AWS_EC2_SSH_KEY }}" >> ~/.ssh/known_hosts || {
             echo "Error adding host to known_hosts"
             exit 1
