@@ -42,10 +42,9 @@ jobs:
 
       - name: Build React Frontend
         run: |
-          cd /var/www/html/frontend
           npm ci
           npm run build
-          cd ..
+        
 
       - name: Deploy React Frontend
         env:
@@ -53,13 +52,12 @@ jobs:
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
           FRONTEND_DIR: ${{ secrets.FRONTEND_DIR }}
         run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" frontend/build/ $EC2_USER@$EC2_HOST:$FRONTEND_DIR
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:$FRONTEND_DIR
 
       - name: Install Backend Dependencies
         run: |
-          cd backend
           npm ci
-          cd ..
+      
 
       - name: Deploy Node.js Backend
         env:
@@ -67,7 +65,7 @@ jobs:
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
           APP_DIR: ${{ secrets.APP_DIR }}
         run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" backend/ $EC2_USER@$EC2_HOST:$APP_DIR \
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:$APP_DIR \
           --exclude='node_modules' \
           --exclude='.env'
 
