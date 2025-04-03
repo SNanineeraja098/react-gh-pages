@@ -3,7 +3,7 @@ name: Deploy Node.js Backend and React Frontend
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   build-and-deploy:
