@@ -42,7 +42,7 @@ jobs:
 
       - name: Build React Frontend
         run: |
-          cd frontend
+          cd /var/www/html/frontend
           npm ci
           npm run build
           cd ..
