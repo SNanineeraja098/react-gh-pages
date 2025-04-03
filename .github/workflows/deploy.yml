@@ -21,10 +21,21 @@ jobs:
 
       - name: Set up SSH
         run: |
+          # Create .ssh directory with secure permissions
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 700 ~/.ssh
+          
+          # Properly format the private key (handles newlines in GitHub secrets)
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+        
+          # Add EC2 host to known_hosts with all key types
+          ssh-keyscan -t rsa,ecdsa,ed25519 ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+        
+          # Verify setup
+          echo "SSH setup complete. Known hosts:"
+          cat ~/.ssh/known_hosts
 
       # Install dependencies and build React
       - name: Build React Frontend
