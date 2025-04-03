@@ -44,7 +44,6 @@ jobs:
         run: |
           npm ci
           npm run build
-        
 
       - name: Deploy React Frontend
         env:
@@ -52,13 +51,22 @@ jobs:
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
           FRONTEND_DIR: ${{ secrets.FRONTEND_DIR }}
         run: |
-          # rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:$FRONTEND_DIR
-          ssh -i ~/.ssh/id_rsa $EC2_USER@EC2_HOST "sudo chown -R $EC2_USER:$EC2_USER $FRONTEND_DIR && sudo chmod -R 755 $FRONTEND_DIR"
-          sudo rsync -a --delete ~/temp-build/ $FRONTEND_DIR/
-      - name: Install Backend Dependencies
-        run: |
-          npm ci
-      
+          # First verify connection
+          echo "Testing connection to $EC2_USER@$EC2_HOST..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH successful!'"
+          
+          # Deploy in two stages
+          echo "Copying files to temp location..."
+          rsync -avz -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:~/temp-build/
+          
+          echo "Moving files to final location..."
+          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "
+            sudo mkdir -p $FRONTEND_DIR && \
+            sudo chown -R $EC2_USER:$EC2_USER $FRONTEND_DIR && \
+            sudo chmod -R 755 $FRONTEND_DIR && \
+            sudo rsync -a --delete ~/temp-build/ $FRONTEND_DIR/ && \
+            echo 'Deployment completed successfully'
+          "
 
       - name: Deploy Node.js Backend
         env:
@@ -66,9 +74,9 @@ jobs:
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
           APP_DIR: ${{ secrets.APP_DIR }}
         run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:$APP_DIR \
-          --exclude='node_modules' \
-          --exclude='.env'
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" backend/ $EC2_USER@$EC2_HOST:$APP_DIR \
+            --exclude='node_modules' \
+            --exclude='.env'
 
       - name: Restart Node.js Service
         env:
