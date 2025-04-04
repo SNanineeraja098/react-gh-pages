@@ -1,4 +1,4 @@
-name: Deploy Node.js Backend and React Frontend
+name: Deploy React Frontend
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - master
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,116 +19,40 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Set up SSH
-        run: |
-          # Create .ssh directory with secure permissions
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          # Properly format the private key
-          echo "${{ secrets.AWS_EC2_SSH_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-        
-          # Add EC2 host to known_hosts
-          ssh-keyscan -t rsa,ecdsa,ed25519 ${{ secrets.AWS_EC2_HOST }} >> ~/.ssh/known_hosts || {
-            echo "Error adding host to known_hosts"
-            exit 1
-          }
-          chmod 644 ~/.ssh/known_hosts
-        
-          # Verify SSH setup
-          echo "SSH setup complete. Testing connection..."
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.AWS_EC2_USER }}@${{ secrets.AWS_EC2_HOST }} "echo 'SSH connection successful!'"
-
-      - name: Build React Frontend
+      - name: Install dependencies and build
         run: |
           npm ci
           npm run build
-          ls -la build/ # Verify build directory
+          ls -la build/ # Verify build files
 
-      - name: Deploy React Frontend
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -t rsa ${{ secrets.AWS_EC2_HOST }} >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
-          FRONTEND_DIR: ${{ secrets.FRONTEND_DIR }}
+          DEPLOY_DIR: ${{ secrets.FRONTEND_DEPLOY_DIR }} # e.g. /var/www/html
         run: |
-          # Create directory and set permissions on server
+          # Create directory and set permissions
           ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "
-            sudo mkdir -p $FRONTEND_DIR && \
-            sudo chown -R $EC2_USER:$EC2_USER $FRONTEND_DIR && \
-            sudo chmod -R 755 $FRONTEND_DIR
+            sudo mkdir -p $DEPLOY_DIR && \
+            sudo chown -R $EC2_USER:$EC2_USER $DEPLOY_DIR && \
+            sudo chmod -R 755 $DEPLOY_DIR
           "
           
-          # Deploy with proper permissions
-          rsync -avz --no-perms --no-group --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
-            --delete -e "ssh -i ~/.ssh/id_rsa" \
-            build/ $EC2_USER@$EC2_HOST:$FRONTEND_DIR/
+          # Deploy files
+          rsync -avz --delete \
+            --no-perms --no-group \
+            --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
+            -e "ssh -i ~/.ssh/id_rsa" \
+            build/ $EC2_USER@$EC2_HOST:$DEPLOY_DIR/
 
           # Verify deployment
-          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "ls -la $FRONTEND_DIR"
-
-      - name: Deploy Node.js Backend
-        env:
-          EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
-          EC2_USER: ${{ secrets.AWS_EC2_USER }}
-          APP_DIR: ${{ secrets.APP_DIR }}
-        run: |
-          # Verify backend files exist
-          if [ ! -f "server.js" ] && [ ! -f "app.js" ]; then
-            echo "Error: No backend entry file found (server.js or app.js)"
-            ls -la
-            exit 1
-          fi
-          
-          # Prepare server directory
-          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "
-            # sudo mkdir -p $APP_DIR && \
-            sudo chown -R $EC2_USER:$EC2_USER $APP_DIR && \
-            sudo chmod -R 755 $APP_DIR
-          "
-          
-          # Deploy backend files
-          rsync -avz --no-perms --no-group --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
-            --delete -e "ssh -i ~/.ssh/id_rsa" \
-            . $EC2_USER@$EC2_HOST:$APP_DIR/ \
-            --include='server.js' \
-            --include='app.js' \
-            --include='package.json' \
-            --include='package-lock.json' \
-            --include='src/' \
-            --exclude='*' \
-            --exclude='node_modules' \
-            --exclude='.env'
-
-      - name: Restart Node.js Service
-        env:
-          EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
-          EC2_USER: ${{ secrets.AWS_EC2_USER }}
-          APP_DIR: ${{ secrets.APP_DIR }}
-        run: |
-          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << 'EOF'
-          set -e
-          echo "Deploying Node.js Application..."
-          cd $APP_DIR
-          
-          # Install PM2 if missing
-          if ! command -v pm2 &> /dev/null; then
-            echo "Installing PM2..."
-            sudo npm install -g pm2
-          fi
-          
-          # Install production dependencies
-          echo "Installing dependencies..."
-          npm ci --only=production
-          
-          # Restart or start application
-          echo "Starting/Restarting application..."
-          pm2 delete my-app || true
-          pm2 start app.js --name "my-app" || pm2 start server.js --name "my-app"
-          
-          # Save PM2 process list
-          pm2 save
-          
-          # Set PM2 to start on boot
-          pm2 startup
-          EOF
+          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "ls -la $DEPLOY_DIR"
