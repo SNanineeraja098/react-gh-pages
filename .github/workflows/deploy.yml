@@ -30,20 +30,21 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
         
           # Add EC2 host to known_hosts
-          ssh-keyscan -t rsa ${{ secrets.AWS_EC2_HOST }} >> ~/.ssh/known_hosts || {
+          ssh-keyscan -t rsa,ecdsa,ed25519 ${{ secrets.AWS_EC2_HOST }} >> ~/.ssh/known_hosts || {
             echo "Error adding host to known_hosts"
             exit 1
           }
           chmod 644 ~/.ssh/known_hosts
         
-          # Verify setup
-          echo "SSH setup complete. Known hosts:"
-          cat ~/.ssh/known_hosts
+          # Verify SSH setup
+          echo "SSH setup complete. Testing connection..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.AWS_EC2_USER }}@${{ secrets.AWS_EC2_HOST }} "echo 'SSH connection successful!'"
 
       - name: Build React Frontend
         run: |
           npm ci
           npm run build
+          ls -la build/ # Verify build directory
 
       - name: Deploy React Frontend
         env:
@@ -51,22 +52,20 @@ jobs:
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
           FRONTEND_DIR: ${{ secrets.FRONTEND_DIR }}
         run: |
-          # First verify connection
-          echo "Testing connection to $EC2_USER@$EC2_HOST..."
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH successful!'"
-          
-          # Deploy in two stages
-          echo "Copying files to temp location..."
-          rsync -avz -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:~/temp-build/
-          
-          echo "Moving files to final location..."
+          # Create directory and set permissions on server
           ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "
             sudo mkdir -p $FRONTEND_DIR && \
             sudo chown -R $EC2_USER:$EC2_USER $FRONTEND_DIR && \
-            sudo chmod -R 755 $FRONTEND_DIR && \
-            sudo rsync -a --delete ~/temp-build/ $FRONTEND_DIR/ && \
-            echo 'Deployment completed successfully'
+            sudo chmod -R 755 $FRONTEND_DIR
           "
+          
+          # Deploy with proper permissions
+          rsync -avz --no-perms --no-group --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
+            --delete -e "ssh -i ~/.ssh/id_rsa" \
+            build/ $EC2_USER@$EC2_HOST:$FRONTEND_DIR/
+
+          # Verify deployment
+          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "ls -la $FRONTEND_DIR"
 
       - name: Deploy Node.js Backend
         env:
@@ -74,7 +73,30 @@ jobs:
           EC2_USER: ${{ secrets.AWS_EC2_USER }}
           APP_DIR: ${{ secrets.APP_DIR }}
         run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa" build/ $EC2_USER@$EC2_HOST:$APP_DIR \
+          # Verify backend files exist
+          if [ ! -f "server.js" ] && [ ! -f "app.js" ]; then
+            echo "Error: No backend entry file found (server.js or app.js)"
+            ls -la
+            exit 1
+          fi
+          
+          # Prepare server directory
+          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "
+            # sudo mkdir -p $APP_DIR && \
+            sudo chown -R $EC2_USER:$EC2_USER $APP_DIR && \
+            sudo chmod -R 755 $APP_DIR
+          "
+          
+          # Deploy backend files
+          rsync -avz --no-perms --no-group --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
+            --delete -e "ssh -i ~/.ssh/id_rsa" \
+            . $EC2_USER@$EC2_HOST:$APP_DIR/ \
+            --include='server.js' \
+            --include='app.js' \
+            --include='package.json' \
+            --include='package-lock.json' \
+            --include='src/' \
+            --exclude='*' \
             --exclude='node_modules' \
             --exclude='.env'
 
@@ -89,12 +111,24 @@ jobs:
           echo "Deploying Node.js Application..."
           cd $APP_DIR
           
+          # Install PM2 if missing
           if ! command -v pm2 &> /dev/null; then
             echo "Installing PM2..."
             sudo npm install -g pm2
           fi
           
+          # Install production dependencies
           echo "Installing dependencies..."
           npm ci --only=production
-          pm2 restart all || pm2 start app.js --name "my-app"
+          
+          # Restart or start application
+          echo "Starting/Restarting application..."
+          pm2 delete my-app || true
+          pm2 start app.js --name "my-app" || pm2 start server.js --name "my-app"
+          
+          # Save PM2 process list
+          pm2 save
+          
+          # Set PM2 to start on boot
+          pm2 startup
           EOF
